@@ -184,31 +184,32 @@ __do_fork (void *aux) {
         goto error;
 #endif
 
-    /* fd_list 기반으로 파일 디스크립터 복제 */
-    list_init (&current->fd_list);
-    /* 부모가 할당했던 마지막 FD 값 그대로 가져오기 */
-    current->last_created_fd = parent->last_created_fd;
+   	 /* 3. 파일 디스크립터 복사 (fd_list 기반) */
+    list_init(&current->fd_list);
+    struct list_elem *e;
+    for (e = list_begin(&parent->fd_list); e != list_end(&parent->fd_list); e = list_next(e)) {
+        struct file_descriptor *parent_fd = list_entry(e, struct file_descriptor, fd_elem);
+        
+        struct file *dup = file_duplicate(parent_fd->file_p);
+        if (dup == NULL)
+            continue;
 
-    for (struct list_elem *e = list_begin (&parent->fd_list);
-         e != list_end (&parent->fd_list);
-         e = list_next (e)) {
-        struct file_descriptor *pd =
-            list_entry (e, struct file_descriptor, fd_elem);
+        struct file_descriptor *child_fd = malloc(sizeof(struct file_descriptor));
+        if (child_fd == NULL) {
+            file_close(dup);
+            continue;
+        }
 
-        /* 새 descriptor 생성 */
-        struct file_descriptor *cd = malloc (sizeof *cd);
-        if (!cd)
-            goto error;
+        child_fd->fd = parent_fd->fd;
+        child_fd->file_p = dup;
+        list_push_back(&current->fd_list, &child_fd->fd_elem);
 
-        cd->fd = pd->fd;
-        if (pd->fd > 2)
-            cd->file_p = file_duplicate (pd->file_p);
-        else
-            cd->file_p = pd->file_p;
-
-        list_push_back (&current->fd_list, &cd->fd_elem);
+        if (current->last_created_fd <= parent_fd->fd)
+            current->last_created_fd = parent_fd->fd + 1;
     }
 
+
+	process_init();
     sema_up (&current->fork_sema);
 
     if (succ)
@@ -365,10 +366,20 @@ process_exit (void) {
 	 * TODO: Implement process termination message (see
 	 * TODO: project2/process_termination.html).
 	 * TODO: We recommend you to implement process resource cleanup here. */
+	struct list_elem *e, *next;
+    for (e = list_begin(&curr->fd_list); e != list_end(&curr->fd_list); e = next) {
+        next = list_next(e);
+        struct file_descriptor *fd = list_entry(e, struct file_descriptor, fd_elem);
+        if (fd->file_p != NULL)
+            file_close(fd->file_p);
+        list_remove(e);
+        free(fd);
+    }
 
+	file_close(curr->running); // 추가 기능
+	process_cleanup ();
 	sema_up(&curr->wait_sema);
 	sema_down(&curr->free_sema);
-	process_cleanup ();
 }
 
 /* Free the current process's resources. */
@@ -495,7 +506,7 @@ load (const char *file_name, struct intr_frame *if_) {
 		printf ("load: %s: open failed\n", file_name);
 		goto done;
 	}
-
+	
 	/* Read and verify executable header. */
 	if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
 			|| memcmp (ehdr.e_ident, "\177ELF\2\1\1", 7)
@@ -569,7 +580,9 @@ load (const char *file_name, struct intr_frame *if_) {
 				break;
 		}
 	}
-
+	
+	t->running = file;
+	file_deny_write(file);
 	/* Set up stack. */
 	if (!setup_stack (if_))
 		goto done;
@@ -584,7 +597,7 @@ load (const char *file_name, struct intr_frame *if_) {
 
 done:
 	/* We arrive here whether the load is successful or not. */
-	file_close (file);
+	// file_close (file); 
 	return success;
 }
 
