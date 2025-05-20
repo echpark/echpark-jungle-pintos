@@ -137,7 +137,6 @@ int write (int fd, const void *buffer, unsigned size)
 // 		void putbuf(const char *buffer, size_t n)
 // 		off_t file_write(struct file *file, const void *buffer, off_t size)
 
-
     /* 유저 버퍼 유효성 검사 */
     if (buffer == NULL)
         return -1;
@@ -176,11 +175,12 @@ bool remove (const char *file) {
 int open (const char *file) {
 	check_address(file); // 주소 유효한지 체크
 	struct file *opened_file = filesys_open(file); // 파일 열기 시도, 열려고 하는 파일 정보 filesys_open()으로 받기
-	
+
 	// 제대로 파일 생성됐는지 체크
 	if (opened_file == NULL) {
 		return -1;
 	}
+
 	int fd = allocate_fd(opened_file); // 만들어진 파일 스레드 내 fdt 테이블에 추가
 
 	// 만약 파일을 열 수 없으면 -1
