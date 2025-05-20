@@ -20,7 +20,7 @@ bool remove (const char *file);
 int filesize(int fd) ;
 void seek(int fd, unsigned position);
 unsigned tell(int fd);
-void close (inf fd);
+void close (int fd);
 
 /* System call.
  *
