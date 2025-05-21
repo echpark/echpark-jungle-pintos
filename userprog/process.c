@@ -83,7 +83,6 @@ initd (void *f_name) {
 	NOT_REACHED ();
 }
 
-
 /* 현재 프로세스를 `name`으로 복제합니다. 새 프로세스의 스레드 ID를 반환하거나,
  * 스레드를 생성할 수 없는 경우 TID_ERROR를 반환합니다.*/
 tid_t
@@ -129,7 +128,7 @@ duplicate_pte (uint64_t *pte, void *va, void *aux) {
 
 	/* 1. TODO: If the parent_page is kernel page, then return immediately. */
 	if is_kernel_vaddr(va){
-		return true;
+		return false;
 	}
 	/* 2. Resolve VA from the parent's page map level 4. */
 	parent_page = pml4_get_page (parent->pml4, va);
@@ -165,9 +164,8 @@ __do_fork (void *aux) {
     struct intr_frame if_;
     struct thread *parent = (struct thread *) aux;
     struct thread *current = thread_current ();
-    struct intr_frame *parent_if = &parent->parent_if;
-	
-	current->parent = parent;
+    struct intr_frame *parent_if;  /* process_fork()에서 넘겨준 부모의 intr_frame */
+    bool succ = true;
 
     /* CPU 컨텍스트 복사 */
     memcpy (&if_, parent_if, sizeof (struct intr_frame));
@@ -199,31 +197,40 @@ __do_fork (void *aux) {
         if (dup == NULL)
             continue;
 
-        struct file_descriptor *child_fd = malloc(sizeof(struct file_descriptor));
-        if (child_fd == NULL) {
-            file_close(dup);
-            continue;
-        }
+    /* fd_list 기반으로 파일 디스크립터 복제 */
+    list_init (&current->fd_list);
+    /* 부모가 할당했던 마지막 FD 값 그대로 가져오기 */
+    current->last_created_fd = parent->last_created_fd;
 
-        child_fd->fd = parent_fd->fd;
-        child_fd->file_p = dup;
-        list_push_back(&current->fd_list, &child_fd->fd_elem);
+    for (struct list_elem *e = list_begin (&parent->fd_list);
+         e != list_end (&parent->fd_list);
+         e = list_next (e)) {
+        struct file_descriptor *pd =
+            list_entry (e, struct file_descriptor, fd_elem);
 
-        if (current->last_created_fd <= parent_fd->fd)
-            current->last_created_fd = parent_fd->fd + 1;
+        /* 새 descriptor 생성 */
+        struct file_descriptor *cd = malloc (sizeof *cd);
+        if (!cd)
+            goto error;
+
+        cd->fd = pd->fd;
+        if (pd->fd > 2)
+            cd->file_p = file_duplicate (pd->file_p);
+        else
+            cd->file_p = pd->file_p;
+
+        list_push_back (&current->fd_list, &cd->fd_elem);
     }
 
-	list_push_back(&parent->child_list, &current->child_elem);
-	process_init();
-	sema_up (&current->fork_sema);
+    sema_up (&current->fork_sema);
 
-
-	do_iret (&if_);
+    if (succ)
+        do_iret (&if_);
 
 error:
-	current->exit_status = TID_ERROR;
+    current->exit_status = TID_ERROR;
     sema_up (&current->fork_sema);
-    thread_exit();
+    exit (TID_ERROR);
 }
 /* Switch the current execution context to the f_name.
  * Returns -1 on fail. */
@@ -337,6 +344,7 @@ process_wait (tid_t child_tid) {
 	sema_down(&child->wait_sema); // 부모가 자식의 종료를 기다린다.
 	int exit_code = child->exit_status; 
 	list_remove(&child->child_elem);
+
 	sema_up(&child->free_sema); // 자식이 자신의 리소스를 해제할 시점 조절을 위함
 
 	return exit_code;
@@ -350,17 +358,6 @@ process_exit (void) {
 	 * TODO: Implement process termination message (see
 	 * TODO: project2/process_termination.html).
 	 * TODO: We recommend you to implement process resource cleanup here. */
-	struct list_elem *e, *next;
-    for (e = list_begin(&curr->fd_list); e != list_end(&curr->fd_list); e = next) {
-        next = list_next(e);
-        struct file_descriptor *fd = list_entry(e, struct file_descriptor, fd_elem);
-        if (fd->file_p != NULL)
-            file_close(fd->file_p);
-        list_remove(e);
-
-        free(fd);
-    }
-
 	file_close(curr->running);
 	sema_up(&curr->wait_sema);
 	sema_down(&curr->free_sema);
@@ -373,6 +370,8 @@ process_cleanup (void) {
 	struct thread *curr = thread_current ();
 
 #ifdef VM
+	file_allow_write (curr -> exec_file);
+	file_close (curr->exec_file);
 	supplemental_page_table_kill (&curr->spt);
 #endif
 

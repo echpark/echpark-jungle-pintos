@@ -133,21 +133,33 @@ void exit(int status){
 	thread_exit();	
 }
 
-int write(int fd, const void *buffer, unsigned size) {
-	check_address(buffer);
-	check_address((char *)buffer + size - 1);
+int write (int fd, const void *buffer, unsigned size)
+{
+// Writes size bytes from buffer to the open file fd.
+// Returns the number of bytes actually written.
+// If fd is 1, it writes to the console using putbuf(), otherwise write to the file using file_write() function.
+// 		void putbuf(const char *buffer, size_t n)
+// 		off_t file_write(struct file *file, const void *buffer, off_t size)
 
-	if (fd == STDOUT_FILENO) {
-		putbuf(buffer, size);
-		return size;
-	}
-
-	if (fd == STDIN_FILENO || fd < 2)
-		return -1;
-
-	struct file *f = find_file_by_fd(fd);
-	if (f == NULL)
-		return -1;
+    /* 유저 버퍼 유효성 검사 */
+    if (buffer == NULL)
+        return -1;
+    check_address(buffer);
+    if (size > 0)
+        check_address ((const char *)buffer + size - 1);
+    /* stdout (fd == 1) 처리 */
+    if (fd == 1) {
+				// putbuf: 커널 콘솔에 buffer의 내용을 size만큼 출력
+        putbuf (buffer, size);
+        return size;
+    }
+    /* stdin (fd == 0) 쓰기 불가 */
+    if (fd == 0)
+        return -1;
+    /* 열린 파일 조회 */
+    struct file *f = find_file_by_fd(fd);
+    if (f == NULL)
+        return -1;
 
 	lock_acquire(&filesys_lock);
 	int ret = file_write(f, buffer, size);
@@ -174,10 +186,13 @@ int open (const char *file) {
 	}
 	lock_acquire(&filesys_lock);
 	struct file *opened_file = filesys_open(file); // 파일 열기 시도, 열려고 하는 파일 정보 filesys_open()으로 받기
+
+	// 제대로 파일 생성됐는지 체크
 	if (opened_file == NULL) {
-      return -1;
-  	} 
-	int fd = allocate_fd(opened_file); // 만들어진 파일 스레드 내 fdt 테이블에 추가	
+		return -1;
+	}
+	int fd = allocate_fd(opened_file); // 만들어진 파일 스레드 내 fdt 테이블에 추가
+
 	// 만약 파일을 열 수 없으면 -1
 	if (fd == -1) {
 		file_close(opened_file);
