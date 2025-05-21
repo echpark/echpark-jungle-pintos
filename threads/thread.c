@@ -334,8 +334,12 @@ thread_exit (void) {
 	list_remove(&thread_current()->all_elem);
 	/* Just set our status to dying and schedule another process.
 	We will be destroyed during the call to schedule_tail(). */
+
 	intr_disable ();
 	sema_down(&curr->free_sema);
+
+	intr_yield_on_return();
+
 	do_schedule (THREAD_DYING);
 	NOT_REACHED ();
 }
@@ -957,6 +961,7 @@ int allocate_fd (struct file *file)
 
     // 현재 스레드의 fd_list 에 추가
     struct thread *t = thread_current ();
+
     desc->fd     = t->last_created_fd++;
     desc->file_p = file;
     list_push_back (&t->fd_list, &desc->fd_elem);

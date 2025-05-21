@@ -187,6 +187,7 @@ int open (const char *file) {
 }
 
 tid_t fork (const char *thread_name, struct intr_frame *f){
+	thread_yield();
 	return process_fork(thread_name, f);
 }
 

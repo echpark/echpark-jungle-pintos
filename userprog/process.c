@@ -109,6 +109,10 @@ process_fork (const char *name, struct intr_frame *if_ UNUSED) {
 		}
 	}
 	sema_down(&child->fork_sema);
+
+	if (child->exit_status == TID_ERROR)
+    	return TID_ERROR;
+
 	return pid;
 }
 
@@ -162,6 +166,8 @@ __do_fork (void *aux) {
     struct thread *parent = (struct thread *) aux;
     struct thread *current = thread_current ();
     struct intr_frame *parent_if = &parent->parent_if;
+	
+	current->parent = parent;
 
     /* CPU 컨텍스트 복사 */
     memcpy (&if_, parent_if, sizeof (struct intr_frame));
@@ -207,9 +213,9 @@ __do_fork (void *aux) {
             current->last_created_fd = parent_fd->fd + 1;
     }
 
-
+	list_push_back(&parent->child_list, &current->child_elem);
 	process_init();
-    sema_up (&current->fork_sema);
+	sema_up (&current->fork_sema);
 
 
 	do_iret (&if_);
@@ -320,7 +326,8 @@ process_wait (tid_t child_tid) {
 			break;
 		}
 	}
-	if (child == NULL || child->parent != curr){
+
+	if ((child == NULL) || child->parent != curr){
 		return -1;
 	}
 	if (child->already_waited){
@@ -330,7 +337,6 @@ process_wait (tid_t child_tid) {
 	sema_down(&child->wait_sema); // 부모가 자식의 종료를 기다린다.
 	int exit_code = child->exit_status; 
 	list_remove(&child->child_elem);
-
 	sema_up(&child->free_sema); // 자식이 자신의 리소스를 해제할 시점 조절을 위함
 
 	return exit_code;
@@ -356,11 +362,9 @@ process_exit (void) {
     }
 
 	file_close(curr->running);
-
-	// sema_up(&curr->wait_sema);
+	sema_up(&curr->wait_sema);
 	sema_down(&curr->free_sema);
 	process_cleanup ();
-
 }
 
 /* Free the current process's resources. */
@@ -576,8 +580,12 @@ load (const char *file_name, struct intr_frame *if_) {
 
 done:
 	/* We arrive here whether the load is successful or not. */
-	// file_close (file); 
-	return success;
+    if (!success) {
+        if (file != NULL)
+            file_close(file);  // 실행 파일도 닫아줘야 함
+        thread_exit();         // 자식 스레드가 load 실패 후 리소스를 해제하게 함
+    }
+    return success;
 }
 
 
