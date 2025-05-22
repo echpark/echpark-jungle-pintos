@@ -229,6 +229,7 @@ error:
  * Returns -1 on fail. */
 int
 process_exec (void *f_name) {
+	// msg("process exec 들어옴");
 	char *buffer[64];
 	char *file_name = f_name;
 	char *token, *save_ptr;
@@ -249,8 +250,10 @@ process_exec (void *f_name) {
 	/* We first kill the current context */
 	process_cleanup ();
 
+	// msg("load 입장전");
 	/* And then load the binary */
 	success = load (file_name, &_if);
+	// msg("load 입장후");
 
 	/* set up stack */
 	if (success){
@@ -265,9 +268,10 @@ process_exec (void *f_name) {
 
 	/* If load failed, quit. */
 	palloc_free_page (file_name);
-	if (!success)
+	if (!success) {
+		// msg("sucess안됨");
 		return -1;
-
+	}
 	/* Start switched process. */
 	do_iret (&_if);
 	NOT_REACHED ();
@@ -470,6 +474,7 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
  * Returns true if successful, false otherwise. */
 static bool
 load (const char *file_name, struct intr_frame *if_) {
+	// msg("load 입장");
 	struct thread *t = thread_current ();
 	struct ELF ehdr;
 	struct file *file = NULL;
@@ -481,11 +486,14 @@ load (const char *file_name, struct intr_frame *if_) {
 	t->pml4 = pml4_create ();
 	if (t->pml4 == NULL)
 		goto done;
+	// msg("process_activate 입장전");
 	process_activate (thread_current ());
+	// msg("process_activate 입장후");
 
 	/* Open executable file. */
 	file = filesys_open (file_name);
 	if (file == NULL) {
+		// msg("file은 NULL");
 		printf ("load: %s: open failed\n", file_name);
 		goto done;
 	}
@@ -579,13 +587,13 @@ load (const char *file_name, struct intr_frame *if_) {
 	success = true;
 
 done:
-	/* We arrive here whether the load is successful or not. */
-    if (!success) {
-        if (file != NULL)
-            file_close(file);  // 실행 파일도 닫아줘야 함
-        thread_exit();         // 자식 스레드가 load 실패 후 리소스를 해제하게 함
+  /* We arrive here whether the load is successful or not. */
+  // file_close (file);
+      if (!success && file != NULL) {          /* ★ CHANGED – 실패 시 close */
+        file_close (file);
+        file = NULL;
     }
-    return success;
+  return success;
 }
 
 

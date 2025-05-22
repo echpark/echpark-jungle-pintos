@@ -187,7 +187,6 @@ int open (const char *file) {
 }
 
 tid_t fork (const char *thread_name, struct intr_frame *f){
-	thread_yield();
 	return process_fork(thread_name, f);
 }
 
@@ -228,26 +227,31 @@ int filesize(int fd) {
 }
 
 int exec (const char *file_name){
+	// msg("exec들어옴");
 	check_address(file_name);
 
+	// msg("check_address통과");
 	// file_name의 길이를 구한다.
     // strlen은 널 문자를 포함하지 않기 때문에 널 문자 포함을 위해 1을 더해준다.
 	int size = strlen(file_name) + 1;
+	// msg("size통과");
 	// 새로운 페이지를 할당받고 0으로 초기화한다.(PAL_ZERO)
     // 여기에 file_name을 복사할 것이다
 	char *fn_copy = palloc_get_page(PAL_ZERO);
+	// msg("fn통과");
 	if ((fn_copy) == NULL) {
 		exit(-1);
 	}
 	// file_name 문자열을 file_name_size만큼 fn_copy에 복사한다
 	strlcpy(fn_copy, file_name, size);
-
+	// msg("strlcpy통과");
 	// process_exec 호출, 여기서 인자 파싱 및 file load 등등이 일어난다.
     // file 실행이 실패했다면 -1을 리턴한다.
 	if (process_exec(fn_copy) == -1) {
 		return -1;
 	}
 
+	// msg("빠짐");
 	NOT_REACHED();
 	return 0;
 }
