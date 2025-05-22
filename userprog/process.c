@@ -83,6 +83,7 @@ initd (void *f_name) {
 	NOT_REACHED ();
 }
 
+
 /* 현재 프로세스를 `name`으로 복제합니다. 새 프로세스의 스레드 ID를 반환하거나,
  * 스레드를 생성할 수 없는 경우 TID_ERROR를 반환합니다.*/
 tid_t
@@ -108,9 +109,6 @@ process_fork (const char *name, struct intr_frame *if_ UNUSED) {
 		}
 	}
 	sema_down(&child->fork_sema);
-	if (child->exit_status == -1){
-		return TID_ERROR;
-	}
 	return pid;
 }
 
@@ -127,7 +125,7 @@ duplicate_pte (uint64_t *pte, void *va, void *aux) {
 
 	/* 1. TODO: If the parent_page is kernel page, then return immediately. */
 	if is_kernel_vaddr(va){
-		return false;
+		return true;
 	}
 	/* 2. Resolve VA from the parent's page map level 4. */
 	parent_page = pml4_get_page (parent->pml4, va);
@@ -163,8 +161,7 @@ __do_fork (void *aux) {
     struct intr_frame if_;
     struct thread *parent = (struct thread *) aux;
     struct thread *current = thread_current ();
-    struct intr_frame *parent_if;  /* process_fork()에서 넘겨준 부모의 intr_frame */
-    bool succ = true;
+    struct intr_frame *parent_if = &parent->parent_if;
 
     /* CPU 컨텍스트 복사 */
     memcpy (&if_, parent_if, sizeof (struct intr_frame));
@@ -183,7 +180,9 @@ __do_fork (void *aux) {
     if (!pml4_for_each (parent->pml4, duplicate_pte, parent))
         goto error;
 #endif
-
+	if (parent->last_created_fd >= FDCOUNT_LIMIT) {
+		goto error;
+	}
    	 /* 3. 파일 디스크립터 복사 (fd_list 기반) */
     list_init(&current->fd_list);
     struct list_elem *e;
@@ -212,13 +211,13 @@ __do_fork (void *aux) {
 	process_init();
     sema_up (&current->fork_sema);
 
-    if (succ)
-        do_iret (&if_);
+
+	do_iret (&if_);
 
 error:
-    current->exit_status = TID_ERROR;
+	current->exit_status = TID_ERROR;
     sema_up (&current->fork_sema);
-    exit (TID_ERROR);
+    thread_exit();
 }
 /* Switch the current execution context to the f_name.
  * Returns -1 on fail. */
@@ -327,35 +326,16 @@ process_wait (tid_t child_tid) {
 	if (child->already_waited){
 		return -1;
 	}
-	for (int i = 0; i < 100000000; i++){
-		int data = 1;
-	}
-	for (int i = 0; i < 100000000; i++){
-		int data = 1;
-	}
-	for (int i = 0; i < 100000000; i++){
-		int data = 1;
-	}
-	for (int i = 0; i < 100000000; i++){
-		int data = 1;
-	}
-	for (int i = 0; i < 100000000; i++){
-		int data = 1;
-	}
-	for (int i = 0; i < 100000000; i++){
-		int data = 1;
-	}
-	for (int i = 0; i < 100000000; i++){
-		int data = 1;
-	}
-	for (int i = 0; i < 100000000; i++){
-		int data = 1;
-	}
-	for (int i = 0; i < 100000000; i++){
-		int data = 1;
-	}
+	child->already_waited = true;
+	sema_down(&child->wait_sema); // 부모가 자식의 종료를 기다린다.
+	int exit_code = child->exit_status; 
+	list_remove(&child->child_elem);
+	sema_up(&child->free_sema); // 자식이 자신의 리소스를 해제할 시점 조절을 위함
 
-	return -1;
+	if (child->exit_status == TID_ERROR)
+		return TID_ERROR;
+
+	return exit_code;
 }
 
 /* Exit the process. This function is called by thread_exit (). */
@@ -373,11 +353,13 @@ process_exit (void) {
         if (fd->file_p != NULL)
             file_close(fd->file_p);
         list_remove(e);
+
         free(fd);
     }
 
-	file_close(curr->running); // 추가 기능
+	file_close(curr->running);
 	process_cleanup ();
+
 	sema_up(&curr->wait_sema);
 	sema_down(&curr->free_sema);
 }
