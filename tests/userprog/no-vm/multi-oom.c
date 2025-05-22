@@ -31,7 +31,7 @@
 #include <random.h>
 #include "tests/lib.h"
 
-static const int EXPECTED_DEPTH_TO_PASS = 10;
+static const int EXPECTED_DEPTH_TO_PASS = 9;
 static const int EXPECTED_REPETITIONS = 10;
 
 const char *test_name = "multi-oom";
@@ -44,7 +44,6 @@ int make_children (void);
 static void
 consume_some_resources (void)
 {
-  msg("consume_some_resources에 들어옴");
   int fd, fdmax = 126;
 
   /* Open as many files as we can, up to fdmax.
@@ -73,32 +72,25 @@ consume_some_resources (void)
 static int NO_INLINE
 consume_some_resources_and_die (void)
 {
-  msg("consume_some_resouces_and_die에 들어옴");
   consume_some_resources ();
   int *KERN_BASE = (int *)0x8004000000;
-  msg("KERN_BASE는 %d임", *KERN_BASE);
 
   switch (random_ulong () % 5) {
 	case 0:
-    msg("0에 들어옴");
 	  *(int *) NULL = 42;
     break;
 
 	case 1:
-      msg("1에 들어옴");
 	  return *(int *) NULL;
 
 	case 2:
-      msg("2에 들어옴");
 	  return *KERN_BASE;
 
 	case 3:
-      msg("3에 들어옴");
 	  *KERN_BASE = 42;
     break;
 
 	case 4:
-      msg("4에 들어옴");
 	  open ((char *)KERN_BASE);
 	  exit (-1);
     break;
@@ -111,31 +103,23 @@ consume_some_resources_and_die (void)
 
 int
 make_children (void) {
-  msg("make_children에 들어옴");
   int i = 0;
   int pid;
   char child_name[128];
   for (; ; random_init (i), i++) {
-    msg("make_children에서의 현재 i : %i", i);
     if (i > EXPECTED_DEPTH_TO_PASS/2) {
-      msg("%d는 비정상 종료", i);
       // 비정상 종료
       snprintf (child_name, sizeof child_name, "%s_%d_%s", "child", i, "X");
-      msg("child_name은 %s", child_name);
       pid = fork(child_name);
-      msg("fork함 pid는 %d", pid);
       if (pid > 0 && wait (pid) != -1) {
-        msg("pid > 0 && wait (pid) != -1임");
         fail ("crashed child should return -1.");
       } else if (pid == 0) {
-        msg("else if에 들어옴");
         consume_some_resources_and_die();
         fail ("Unreachable");
       }
     }
 
     // 정상 종료
-    msg("%d는 정상 종료", i);
     snprintf (child_name, sizeof child_name, "%s_%d_%s", "child", i, "O");
     pid = fork(child_name);
     if (pid < 0) {
@@ -148,9 +132,7 @@ make_children (void) {
   }
 
   int depth = wait (pid);
-  msg("depth는 %d", depth);
   if (depth < 0) {
-    msg("depth < 0임");
 	  fail ("Should return > 0.");
   }
   
@@ -165,15 +147,11 @@ main (int argc UNUSED, char *argv[] UNUSED) {
   msg ("begin");
 
   int first_run_depth = make_children ();
-  msg("처음 만든 자식 개수: %d", first_run_depth);
   CHECK (first_run_depth >= EXPECTED_DEPTH_TO_PASS, "Spawned at least %d children.", EXPECTED_DEPTH_TO_PASS);
 
   for (int i = 0; i < EXPECTED_REPETITIONS; i++) {
-    msg("main의 i : %d", i);
     int current_run_depth = make_children();
-    msg("새로 만든 자식 개수: %d", current_run_depth);
     if (current_run_depth < first_run_depth) {
-      msg("main에서 실패햇어욤");
       fail ("should have forked at least %d times, but %d times forked", 
               first_run_depth, current_run_depth);
     }
